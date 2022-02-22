@@ -310,7 +310,7 @@ bool XPlane::receive_data(void)
             // map channel 6 and 7 from Mixture3 and Mixture4 for extra channels
             rcin_chan_count = MAX(7, rcin_chan_count);
             // rcin[5] = data[3];
-            //rcin[2] = data[3];
+            rcin[2] = data[3];
             //rcin[6] = data[4];
             mix_val = data[4];
             break;
