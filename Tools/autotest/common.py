@@ -1658,7 +1658,7 @@ class AutoTest(ABC):
         if self.params is None:
             self.params = self.model_defaults_filepath(self.frame)
         for x in self.params:
-            self.repeatedly_apply_parameter_file(os.path.join(testdir, x))
+            self.repeatedly_apply_parameter_file(x)
 
     def count_lines_in_filepath(self, filepath):
         return len([i for i in open(filepath)])
@@ -3180,6 +3180,21 @@ class AutoTest(ABC):
         if not temp_ok:
             raise NotAchievedException("target temperature")
 
+    def assert_message_field_values(self, m, fieldvalues, verbose=True):
+        for (fieldname, value) in fieldvalues.items():
+            got = getattr(m, fieldname)
+            if got != value:
+                raise NotAchievedException("Expected %s.%s to be %s, got %s" %
+                                           (m.get_type(), fieldname, value, got))
+            if verbose:
+                self.progress("%s.%s has expected value %s" %
+                              (m.get_type(), fieldname, value))
+
+    def assert_received_message_field_values(self, message, fieldvalues, verbose=True, very_verbose=False):
+        m = self.assert_receive_message(message, verbose=verbose, very_verbose=very_verbose)
+        self.assert_message_field_values(m, fieldvalues, verbose=verbose)
+        return m
+
     def onboard_logging_not_log_disarmed(self):
         self.start_subtest("Test LOG_DISARMED-is-false behaviour")
         self.set_parameter("LOG_DISARMED", 0)
@@ -3524,10 +3539,12 @@ class AutoTest(ABC):
                 raise ValueError("count %u not handled" % count)
         self.progress("Files same")
 
-    def assert_receive_message(self, type, timeout=1, verbose=False):
+    def assert_receive_message(self, type, timeout=1, verbose=False, very_verbose=False):
         m = self.mav.recv_match(type=type, blocking=True, timeout=timeout)
         if verbose:
             self.progress("Received (%s)" % str(m))
+        if very_verbose:
+            self.progress(self.dump_message_verbose(m))
         if m is None:
             raise NotAchievedException("Did not get %s" % type)
         return m
@@ -6748,7 +6765,7 @@ Also, ignores heartbeats not from our target system'''
 
         # need to wait for a heartbeat to arrive as then mavutil will
         # select the correct set of messages for us to receive in
-        # self.mav.messages.  You can actually recieve messages with
+        # self.mav.messages.  You can actually receive messages with
         # recv_match and those will not be in self.mav.messages until
         # you do this!
         self.wait_heartbeat()
@@ -7846,6 +7863,7 @@ Also, ignores heartbeats not from our target system'''
         try:
             self.set_parameter("LOG_BACKEND_TYPE", 4)
             self.set_parameter("LOG_FILE_DSRMROT", 1)
+            self.set_parameter("LOG_BLK_RATEMAX", 1)
             self.reboot_sitl()
             # First log created here, but we are in chip erase so ignored
             mavproxy.send("module load log\n")
@@ -8528,7 +8546,7 @@ Also, ignores heartbeats not from our target system'''
     def test_request_message(self, timeout=60):
         rate = round(self.get_message_rate("CAMERA_FEEDBACK", 10))
         if rate != 0:
-            raise PreconditionFailedException("Receving camera feedback")
+            raise PreconditionFailedException("Receiving camera feedback")
         m = self.poll_message("CAMERA_FEEDBACK")
         if m is None:
             raise NotAchievedException("Requested CAMERA_FEEDBACK did not arrive")
@@ -11677,7 +11695,7 @@ switch value'''
             defaults_filepath = [defaults_filepath]
         defaults_list = []
         for d in defaults_filepath:
-            defaults_list.append(os.path.join(testdir, d))
+            defaults_list.append(util.reltopdir(os.path.join(testdir, d)))
         return defaults_list
 
     def load_default_params_file(self, filename):

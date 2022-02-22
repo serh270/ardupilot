@@ -55,7 +55,6 @@
 #if FRAME_CONFIG == HELI_FRAME
   # define RC_FAST_SPEED                        125
   # define WP_YAW_BEHAVIOR_DEFAULT              WP_YAW_BEHAVIOR_LOOK_AHEAD
-  # define AUTOTUNE_ENABLED                     DISABLED
 #endif
 
 //////////////////////////////////////////////////////////////////////////////
@@ -166,12 +165,6 @@
 
 #ifndef EKF_ORIGIN_MAX_ALT_KM
  # define EKF_ORIGIN_MAX_ALT_KM         50   // EKF origin and home must be within 50km vertically
-#endif
-
-//////////////////////////////////////////////////////////////////////////////
-//  OPTICAL_FLOW
-#ifndef OPTFLOW
- # define OPTFLOW       ENABLED
 #endif
 
 //////////////////////////////////////////////////////////////////////////////

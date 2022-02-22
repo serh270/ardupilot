@@ -18,6 +18,7 @@
 
 #include "AP_InertialSensor.h"
 #include "AP_InertialSensor_BMI160.h"
+#include "AP_InertialSensor_BMI270.h"
 #include "AP_InertialSensor_Backend.h"
 #include "AP_InertialSensor_L3G4200D.h"
 #include "AP_InertialSensor_LSM9DS0.h"
@@ -1010,13 +1011,16 @@ AP_InertialSensor::detect_backends(void)
     }
 #endif
 
-#if defined(HAL_INS_PROBE_LIST)
-    // IMUs defined by IMU lines in hwdef.dat
-    HAL_INS_PROBE_LIST;
-#elif CONFIG_HAL_BOARD == HAL_BOARD_SITL
+#if AP_SIM_INS_ENABLED
     for (uint8_t i=0; i<AP::sitl()->imu_count; i++) {
         ADD_BACKEND(AP_InertialSensor_SITL::detect(*this, i==1?INS_SITL_SENSOR_B:INS_SITL_SENSOR_A));
     }
+    return;
+#endif
+
+#if defined(HAL_INS_PROBE_LIST)
+    // IMUs defined by IMU lines in hwdef.dat
+    HAL_INS_PROBE_LIST;
 #if defined(HAL_SITL_INVENSENSEV3)
     ADD_BACKEND(AP_InertialSensor_Invensensev3::probe(*this, hal.i2c_mgr->get_device(1, 1), ROTATION_NONE));
 #endif

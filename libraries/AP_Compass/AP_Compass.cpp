@@ -1227,7 +1227,7 @@ void Compass::_detect_backends(void)
     }
 #endif
 
-#if CONFIG_HAL_BOARD == HAL_BOARD_SITL
+#if AP_SIM_COMPASS_ENABLED
     ADD_BACKEND(DRIVER_SITL, new AP_Compass_SITL());
 #endif
 
@@ -1353,11 +1353,6 @@ void Compass::_detect_backends(void)
     default:
         break;
     }
-
-#elif HAL_COMPASS_DEFAULT == HAL_COMPASS_NONE
-    // no compass, or only external probe
-#else
-#error Unrecognised HAL_COMPASS_TYPE setting
 #endif
 
 
@@ -1718,7 +1713,7 @@ void Compass::try_set_initial_location()
     }
 
     Location loc;
-    if (!AP::ahrs().get_position(loc)) {
+    if (!AP::ahrs().get_location(loc)) {
         return;
     }
     _initial_location_set = true;

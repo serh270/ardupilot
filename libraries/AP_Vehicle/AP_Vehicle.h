@@ -215,6 +215,9 @@ public:
     // set steering and throttle (-1 to +1) (for use by scripting with Rover)
     virtual bool set_steering_and_throttle(float steering, float throttle) { return false; }
 
+    // set turn rate in deg/sec and speed in meters/sec (for use by scripting with Rover)
+    virtual bool set_desired_turn_rate_and_speed(float turn_rate, float speed) { return false; }
+
     // support for NAV_SCRIPT_TIME mission command
     virtual bool nav_script_time(uint16_t &id, uint8_t &cmd, float &arg1, float &arg2) { return false; }
     virtual void nav_script_time_done(uint16_t id) {}
@@ -239,8 +242,6 @@ public:
 
 #endif // AP_SCRIPTING_ENABLED
 
-    // write out harmonic notch log messages
-    void write_notch_log_messages() const;
     // update the harmonic notch
     virtual void update_dynamic_notch() {};
 
@@ -367,6 +368,10 @@ protected:
 #if HAL_EFI_ENABLED
     // EFI Engine Monitor
     AP_EFI efi;
+#endif
+
+#if AP_AIRSPEED_ENABLED
+    AP_Airspeed airspeed;
 #endif
 
     static const struct AP_Param::GroupInfo var_info[];

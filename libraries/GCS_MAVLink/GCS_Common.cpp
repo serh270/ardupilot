@@ -40,7 +40,6 @@
 #include <AP_Mount/AP_Mount.h>
 #include <AP_Common/AP_FWVersion.h>
 #include <AP_VisualOdom/AP_VisualOdom.h>
-#include <AP_OpticalFlow/OpticalFlow.h>
 #include <AP_Baro/AP_Baro.h>
 #include <AP_EFI/AP_EFI.h>
 #include <AP_Proximity/AP_Proximity.h>
@@ -1652,7 +1651,7 @@ void GCS_MAVLINK::log_mavlink_stats()
 /*
   send the SYSTEM_TIME message
  */
-void GCS_MAVLINK::send_system_time()
+void GCS_MAVLINK::send_system_time() const
 {
     uint64_t time_unix = 0;
     AP::rtc().get_utc_usec(time_unix); // may fail, leaving time_unix at 0
@@ -1770,11 +1769,13 @@ void GCS_MAVLINK::send_scaled_imu(uint8_t instance, void (*send_fn)(mavlink_chan
 #if HAL_INS_ENABLED
     const AP_InertialSensor &ins = AP::ins();
     const Compass &compass = AP::compass();
+    int16_t _temperature = 0;
 
     bool have_data = false;
     Vector3f accel{};
     if (ins.get_accel_count() > instance) {
         accel = ins.get_accel(instance);
+        _temperature = ins.get_temperature(instance)*100;
         have_data = true;
     }
     Vector3f gyro{};
@@ -1802,7 +1803,7 @@ void GCS_MAVLINK::send_scaled_imu(uint8_t instance, void (*send_fn)(mavlink_chan
         mag.x,
         mag.y,
         mag.z,
-        int16_t(ins.get_temperature(instance)*100));
+        _temperature);
 #endif
 }
 
@@ -1826,6 +1827,7 @@ void GCS_MAVLINK::send_scaled_pressure_instance(uint8_t instance, void (*send_fn
     }
 
     float press_diff = 0; // pascal
+#if AP_AIRSPEED_ENABLED
     AP_Airspeed *airspeed = AP_Airspeed::get_singleton();
     if (airspeed != nullptr &&
         airspeed->enabled(instance)) {
@@ -1840,6 +1842,7 @@ void GCS_MAVLINK::send_scaled_pressure_instance(uint8_t instance, void (*send_fn
         }
         have_data = true;
     }
+#endif
 
     if (!have_data) {
         return;
@@ -2309,6 +2312,7 @@ MAV_RESULT GCS_MAVLINK::_set_mode_common(const MAV_MODE _base_mode, const uint32
     return MAV_RESULT_DENIED;
 }
 
+#if AP_OPTICALFLOW_ENABLED
 /*
   send OPTICAL_FLOW message
  */
@@ -2345,6 +2349,7 @@ void GCS_MAVLINK::send_opticalflow()
         flowRate.x,
         flowRate.y);
 }
+#endif  // AP_OPTICALFLOW_ENABLED
 
 /*
   send AUTOPILOT_VERSION packet
@@ -2728,10 +2733,13 @@ void GCS_MAVLINK::send_accelcal_vehicle_position(uint32_t position)
 
 float GCS_MAVLINK::vfr_hud_airspeed() const
 {
+#if AP_AIRSPEED_ENABLED
     AP_Airspeed *airspeed = AP_Airspeed::get_singleton();
     if (airspeed != nullptr && airspeed->healthy()) {
         return airspeed->get_airspeed();
     }
+#endif
+
     // because most vehicles don't have airspeed sensors, we return a
     // different sort of speed estimate in the relevant field for
     // comparison's sake.
@@ -2757,7 +2765,7 @@ void GCS_MAVLINK::send_vfr_hud()
     AP_AHRS &ahrs = AP::ahrs();
 
     // return values ignored; we send stale data
-    UNUSED_RESULT(ahrs.get_position(global_position_current_loc));
+    UNUSED_RESULT(ahrs.get_location(global_position_current_loc));
 
     mavlink_msg_vfr_hud_send(
         chan,
@@ -3194,6 +3202,44 @@ void GCS_MAVLINK::handle_vicon_position_estimate(const mavlink_message_t &msg)
                                                 PAYLOAD_SIZE(chan, VICON_POSITION_ESTIMATE));
 }
 
+/*
+  handle ODOMETRY message. This message combines position, velocity
+  and attitude data
+ */
+void GCS_MAVLINK::handle_odometry(const mavlink_message_t &msg)
+{
+#if HAL_VISUALODOM_ENABLED
+    AP_VisualOdom *visual_odom = AP::visualodom();
+    if (visual_odom == nullptr) {
+        return;
+    }
+
+    mavlink_odometry_t m;
+    mavlink_msg_odometry_decode(&msg, &m);
+
+    if (m.frame_id != MAV_FRAME_LOCAL_FRD ||
+        m.child_frame_id != MAV_FRAME_BODY_FRD) {
+        // only support local FRD frame data
+        return;
+    }
+
+    Quaternion q{m.q[0],m.q[1],m.q[2],m.q[3]};
+
+    float posErr = 0;
+    float angErr = 0;
+    if (!isnan(m.pose_covariance[0])) {
+        posErr = cbrtf(sq(m.pose_covariance[0])+sq(m.pose_covariance[6])+sq(m.pose_covariance[11]));
+        angErr = cbrtf(sq(m.pose_covariance[15])+sq(m.pose_covariance[18])+sq(m.pose_covariance[20]));
+    }
+    
+    const uint32_t timestamp_ms = correct_offboard_timestamp_usec_to_ms(m.time_usec, PAYLOAD_SIZE(chan, ODOMETRY));
+    visual_odom->handle_vision_position_estimate(m.time_usec, timestamp_ms, m.x, m.y, m.z, q, posErr, angErr, m.reset_counter);
+
+    const Vector3f vel{m.vx, m.vy, m.vz};
+    visual_odom->handle_vision_speed_estimate(m.time_usec, timestamp_ms, vel, m.reset_counter);
+#endif
+}
+
 // there are several messages which all have identical fields in them.
 // This function provides common handling for the data contained in
 // these packets
@@ -3242,7 +3288,7 @@ void GCS_MAVLINK::handle_att_pos_mocap(const mavlink_message_t &msg)
         return;
     }
     // note: att_pos_mocap does not include reset counter
-    visual_odom->handle_vision_position_estimate(m.time_usec, timestamp_ms, m.x, m.y, m.z, m.q, 0);
+    visual_odom->handle_vision_position_estimate(m.time_usec, timestamp_ms, m.x, m.y, m.z, m.q, 0, 0, 0);
 #endif
 }
 
@@ -3324,8 +3370,7 @@ void GCS_MAVLINK::handle_rc_channels_override(const mavlink_message_t &msg)
 
 }
 
-// allow override of RC channel values for HIL or for complete GCS
-// control of switch position and RC PWM values.
+#if AP_OPTICALFLOW_ENABLED
 void GCS_MAVLINK::handle_optical_flow(const mavlink_message_t &msg)
 {
     OpticalFlow *optflow = AP::opticalflow();
@@ -3334,6 +3379,7 @@ void GCS_MAVLINK::handle_optical_flow(const mavlink_message_t &msg)
     }
     optflow->handle_msg(msg);
 }
+#endif
 
 
 /*
@@ -3585,6 +3631,10 @@ void GCS_MAVLINK::handle_common_message(const mavlink_message_t &msg)
         handle_vicon_position_estimate(msg);
         break;
 
+    case MAVLINK_MSG_ID_ODOMETRY:
+        handle_odometry(msg);
+        break;
+        
     case MAVLINK_MSG_ID_ATT_POS_MOCAP:
         handle_att_pos_mocap(msg);
         break;
@@ -3601,9 +3651,11 @@ void GCS_MAVLINK::handle_common_message(const mavlink_message_t &msg)
         handle_rc_channels_override(msg);
         break;
 
+#if AP_OPTICALFLOW_ENABLED
     case MAVLINK_MSG_ID_OPTICAL_FLOW:
         handle_optical_flow(msg);
         break;
+#endif
 
     case MAVLINK_MSG_ID_DISTANCE_SENSOR:
         handle_distance_sensor(msg);
@@ -3826,10 +3878,12 @@ MAV_RESULT GCS_MAVLINK::_handle_command_preflight_calibration_baro()
     AP::baro().update_calibration();
     gcs().send_text(MAV_SEVERITY_INFO, "Barometer calibration complete");
 
+#if AP_AIRSPEED_ENABLED
     AP_Airspeed *airspeed = AP_Airspeed::get_singleton();
     if (airspeed != nullptr) {
         airspeed->calibrate(false);
     }
+#endif
 
     return MAV_RESULT_ACCEPTED;
 }
@@ -4613,6 +4667,14 @@ MAV_RESULT GCS_MAVLINK::handle_command_int_packet(const mavlink_command_int_t &p
         return handle_command_do_set_roi_sysid(packet);
     case MAV_CMD_DO_SET_HOME:
         return handle_command_int_do_set_home(packet);
+    case MAV_CMD_STORAGE_FORMAT: {
+        if (!is_equal(packet.param1, 1.0f) ||
+            !is_equal(packet.param2, 1.0f)) {
+            return MAV_RESULT_UNSUPPORTED;
+        }
+        return AP::FS().format() ? MAV_RESULT_ACCEPTED : MAV_RESULT_FAILED;
+    }
+
 #if AP_SCRIPTING_ENABLED
     case MAV_CMD_SCRIPTING:
         {
@@ -4838,7 +4900,7 @@ void GCS_MAVLINK::send_global_position_int()
 {
     AP_AHRS &ahrs = AP::ahrs();
 
-    UNUSED_RESULT(ahrs.get_position(global_position_current_loc)); // return value ignored; we send stale data
+    UNUSED_RESULT(ahrs.get_location(global_position_current_loc)); // return value ignored; we send stale data
 
     Vector3f vel;
     if (!ahrs.get_velocity_NED(vel)) {
@@ -4935,7 +4997,7 @@ void GCS_MAVLINK::send_water_depth() const
     // get position
     const AP_AHRS &ahrs = AP::ahrs();
     Location loc;
-    IGNORE_RETURN(ahrs.get_position(loc));
+    IGNORE_RETURN(ahrs.get_location(loc));
 
     for (uint8_t i=0; i<rangefinder->num_sensors(); i++) {
         const AP_RangeFinder_Backend *s = rangefinder->get_backend(i);
@@ -5132,8 +5194,10 @@ bool GCS_MAVLINK::try_send_message(const enum ap_message id)
         break;
 
     case MSG_OPTICAL_FLOW:
+#if AP_OPTICALFLOW_ENABLED
         CHECK_PAYLOAD_SIZE(OPTICAL_FLOW);
         send_opticalflow();
+#endif
         break;
 
     case MSG_POSITION_TARGET_GLOBAL_INT:
@@ -5853,7 +5917,7 @@ void GCS_MAVLINK::send_high_latency2() const
 {
     AP_AHRS &ahrs = AP::ahrs();
     Location global_position_current;
-    UNUSED_RESULT(ahrs.get_position(global_position_current));
+    UNUSED_RESULT(ahrs.get_location(global_position_current));
 #if !defined(HAL_BUILD_AP_PERIPH) || defined(HAL_PERIPH_ENABLE_BATTERY)
     const int8_t battery_remaining = battery_remaining_pct(AP_BATT_PRIMARY_INSTANCE);
 #endif
@@ -5927,5 +5991,19 @@ void GCS_MAVLINK::send_high_latency2() const
         base_mode(), // Field for custom payload. base mode (arming status) in ArduPilot's case
         0, // Field for custom payload.
         0); // Field for custom payload.
+}
+
+int8_t GCS_MAVLINK::high_latency_air_temperature() const
+{
+#if AP_AIRSPEED_ENABLED
+    // return units are degC
+    AP_Airspeed *airspeed = AP_Airspeed::get_singleton();
+    float air_temperature;
+    if (airspeed != nullptr && airspeed->enabled() && airspeed->get_temperature(air_temperature)) {
+        return air_temperature;
+    }
+#endif
+
+    return INT8_MIN;
 }
 #endif // HAL_HIGH_LATENCY2_ENABLED

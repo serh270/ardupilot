@@ -248,6 +248,9 @@ public:
     // posOffset is the XYZ flow sensor position in the body frame in m
     void writeOptFlowMeas(const uint8_t rawFlowQuality, const Vector2f &rawFlowRates, const Vector2f &rawGyroRates, const uint32_t msecFlowMeas, const Vector3f &posOffset);
 
+    // retrieve latest corrected optical flow samples (used for calibration)
+    bool getOptFlowSample(uint32_t& timeStamp_ms, Vector2f& flowRate, Vector2f& bodyRate, Vector2f& losPred) const;
+
     /*
      * Write body frame linear and angular displacement measurements from a visual odometry sensor
      *
@@ -1186,6 +1189,12 @@ private:
     ftype prevPosE;                 // east position at last measurement
     ftype varInnovRng;              // range finder observation innovation variance (m^2)
     ftype innovRng;                 // range finder observation innovation (m)
+    struct {
+        uint32_t timestamp_ms;      // system timestamp of last correct optical flow sample (used for calibration)
+        Vector2f flowRate;          // latest corrected optical flow flow rate (used for calibration)
+        Vector2f bodyRate;          // latest corrected optical flow body rate (used for calibration)
+        Vector2f losPred;           // EKF estimated component of flowRate that comes from vehicle movement (not rotation)
+    } flowCalSample;
 
     ftype hgtMea;                   // height measurement derived from either baro, gps or range finder data (m)
     bool inhibitGndState;           // true when the terrain position state is to remain constant
@@ -1487,6 +1496,12 @@ private:
     bool EKFGSF_run_filterbank;             // true when the filter bank is active
     uint8_t EKFGSF_yaw_valid_count;         // number of updates since the last invalid yaw estimate
 
+    // logging timestamps
+    uint32_t lastLogTime_ms;
+    uint32_t lastUpdateTime_ms;
+    uint32_t lastEkfStateVarLogTime_ms;
+    uint32_t lastTimingLogTime_ms;
+
     // bits in EK3_AFFINITY
     enum ekf_affinity {
         EKF_AFFINITY_GPS  = (1U<<0),
@@ -1527,7 +1542,7 @@ private:
     void Log_Write_Quaternion(uint64_t time_us) const;
     void Log_Write_Beacon(uint64_t time_us);
     void Log_Write_BodyOdom(uint64_t time_us);
-    void Log_Write_State_Variances(uint64_t time_us) const;
+    void Log_Write_State_Variances(uint64_t time_us);
     void Log_Write_Timing(uint64_t time_us);
     void Log_Write_GSF(uint64_t time_us);
 };
