@@ -20,6 +20,7 @@
 
 #if HAL_SIM_XPLANE_ENABLED
 
+#include <iostream>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
@@ -296,6 +297,11 @@ bool XPlane::receive_data(void)
             gen1 = data[1];
             gen2 = data[2];
             gen3 = data[3];
+            for (int i = sizeof(data) - 1; i >= 0; i--){
+                std::cout << i << data[i];
+                printf("\n");
+            }
+
 
 
             break;
@@ -310,8 +316,6 @@ bool XPlane::receive_data(void)
             //rcin[2] = data[3];
             //rcin[6] = data[4];
             mix_val = data[4];
-            //rcin[2] = 1;
-            //rcin[6] = 1;
             break;
         }
 
@@ -464,7 +468,8 @@ void XPlane::send_data(const struct sitl_input &input)
         if (throttle6 >= 1 || gen1 >= 1) throttle6 = 0.0;
 
         //check if forward motor is needed
-        if (gen3 < 1) throttle5 = 0.0; 
+        if (gen3 < 1) throttle6 = 0.0;
+        if (gen2 < 1) throttle5 = 0.0; 
 
         printf("throttle6 4: %f\n", throttle6);
         
@@ -474,7 +479,7 @@ void XPlane::send_data(const struct sitl_input &input)
         d.data[2] = throttle3;
         d.data[3] = throttle4;
         d.data[4] = throttle5;
-        printf("gen1 : %f\n", gen1);
+        printf("gen3 : %f\n", gen3);
         d.data[5] = throttle6;
         socket_out.send(&d, sizeof(d));
         
