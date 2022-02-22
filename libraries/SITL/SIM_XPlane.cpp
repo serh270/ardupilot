@@ -297,13 +297,10 @@ bool XPlane::receive_data(void)
             gen1 = data[1];
             gen2 = data[2];
             gen3 = data[3];
-            for (int i = sizeof(data) - 1; i >= 0; i--){
-                std::cout << i << data[i];
-                printf("\n");
-            }
-
-
-
+            // for (int i = sizeof(data) - 1; i >= 0; i--){
+            //     std::cout << i << data[i];
+            //     printf("\n");
+            // }
             break;
 
         case WingSweep:
@@ -471,7 +468,7 @@ void XPlane::send_data(const struct sitl_input &input)
         if (gen3 < 1) throttle6 = 0.0;
         if (gen2 < 1) throttle5 = 0.0; 
 
-        printf("throttle6 4: %f\n", throttle6);
+        //printf("throttle6 4: %f\n", throttle6);
         
         d.code = ThrottleCommand;
         d.data[0] = throttle;
@@ -479,7 +476,7 @@ void XPlane::send_data(const struct sitl_input &input)
         d.data[2] = throttle3;
         d.data[3] = throttle4;
         d.data[4] = throttle5;
-        printf("gen3 : %f\n", gen3);
+        //printf("gen3 : %f\n", gen3);
         d.data[5] = throttle6;
         socket_out.send(&d, sizeof(d));
         
