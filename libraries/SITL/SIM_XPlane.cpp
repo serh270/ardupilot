@@ -34,6 +34,10 @@
 #pragma GCC diagnostic ignored "-Wcast-align"
 
 extern const AP_HAL::HAL& hal;
+float mix_val = 0;     
+float gen1;        
+float gen2;
+float gen3;                                                                              
 
 namespace SITL {
 
@@ -47,6 +51,7 @@ XPlane::XPlane(const char *frame_str) :
     }
 
     heli_frame = (strstr(frame_str, "-heli") != nullptr);
+    vtol_frame = (strstr(frame_str, "-vtol") != nullptr);
     num_motors = 2;
 
     socket_in.bind("0.0.0.0", bind_port);
@@ -188,7 +193,10 @@ bool XPlane::receive_data(void)
         case Trim:
             if (heli_frame) {
                 // use flaps for collective as no direct collective data input
-                rcin[2] = data[4];
+                //rcin[2] = data[4];
+            } else {
+                // still use for additional input
+                rcin[4] = data[4];
             }
             break;
             
@@ -234,7 +242,7 @@ bool XPlane::receive_data(void)
             break;
 
         case ThrottleCommand: {
-            if (!heli_frame) {
+            // if (!heli_frame) {
                 /* getting joystick throttle input is very weird. The
                  * problem is that XPlane sends the ThrottleCommand packet
                  * both for joystick throttle input and for throttle that
@@ -245,17 +253,18 @@ bool XPlane::receive_data(void)
                  * but I can't find a better way of allowing joystick
                  * input from XPlane10
                  */
-                bool has_magic = ((uint32_t)(data[1] * throttle_magic_scale) % 1000U) == (uint32_t)(throttle_magic * throttle_magic_scale);
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wfloat-equal"
-                if (data[1] < 0 ||
-                    data[1] == throttle_sent ||
-                    has_magic) {
-                    break;
-                }
-#pragma GCC diagnostic pop
-                rcin[2] = data[1];
-            }
+//                 bool has_magic = ((uint32_t)(data[1] * throttle_magic_scale) % 1000U) == (uint32_t)(throttle_magic * throttle_magic_scale);
+// #pragma GCC diagnostic push
+// #pragma GCC diagnostic ignored "-Wfloat-equal"
+//                 if (data[1] < 0 ||
+//                     data[1] == throttle_sent ||
+//                     has_magic) {
+//                     break;
+//                 }
+// #pragma GCC diagnostic pop
+//                 rcin[2] = data[1];
+//             }
+            // rcin[2] = data[7];
             break;
         }
 
@@ -279,17 +288,35 @@ bool XPlane::receive_data(void)
               in order to get interlock switch on helis we map the
               "generator1 on/off" function of XPlane 10 to channel 8.
              */
-            rcin_chan_count = 8;
+            rcin_chan_count = 9;
+            
             rcin[7] = data[1];
+            rcin[8] = data[2];
+
+            gen1 = data[1];
+            gen2 = data[2];
+            gen3 = data[3];
+
+
+            break;
+
+        case WingSweep:
             break;
 
         case Mixture:
             // map channel 6 and 7 from Mixture3 and Mixture4 for extra channels
             rcin_chan_count = MAX(7, rcin_chan_count);
-            rcin[5] = data[3];
-            rcin[6] = data[4];
+            // rcin[5] = data[3];
+            //rcin[2] = data[3];
+            //rcin[6] = data[4];
+            mix_val = data[4];
+            //rcin[2] = 1;
+            //rcin[6] = 1;
             break;
         }
+
+
+
         len -= pkt_len;
         p += pkt_len;
     }
@@ -370,11 +397,14 @@ void XPlane::send_data(const struct sitl_input &input)
     float aileron  = (input.servos[0]-1500)/500.0f;
     float elevator = (input.servos[1]-1500)/500.0f;
     float throttle = (input.servos[2]-1000)/1000.0;
+
+
     float rudder   = (input.servos[3]-1500)/500.0f;
     struct PACKED {
         uint8_t  marker[5] { 'D', 'A', 'T', 'A', '0' };
         uint32_t code;
-        float    data[8];
+         float    data[8];
+        //float data[5];
     } d {};
 
     if (input.servos[0] == 0) {
@@ -412,23 +442,53 @@ void XPlane::send_data(const struct sitl_input &input)
     socket_out.send(&d, sizeof(d));
 
     if (!heli_frame) {
-        d.code = ThrottleCommand;
-        d.data[0] = throttle;
-        d.data[1] = throttle;
-        d.data[2] = throttle;
-        d.data[3] = throttle;
-        d.data[4] = 0;
-        socket_out.send(&d, sizeof(d));
-    } else {
-        // send chan3 as collective pitch, on scale from -10 to +10
-        float collective = 10*(input.servos[2]-1500)/500.0;
-
-        // and send throttle from channel 8
-        throttle = (input.servos[7]-1000)/1000.0;
+        // and send throttle from channel 5
+        throttle = (input.servos[4]-1000)/1000.0;
+        throttle = ((uint32_t)(throttle * 1000)) * 1.0e-3f + throttle_magic;
 
         // allow for extra throttle outputs for special aircraft
         float throttle2 = (input.servos[5]-1000)/1000.0;
         float throttle3 = (input.servos[6]-1000)/1000.0;
+        float throttle4 = (input.servos[7]-1000)/1000.0; 
+        float throttle5 = (input.servos[8]-1000)/1000.0;
+
+        throttle2 = ((uint32_t)(throttle2 * 1000)) * 1.0e-3f + throttle_magic;
+        throttle3 = ((uint32_t)(throttle3 * 1000)) * 1.0e-3f + throttle_magic;
+        throttle4 = ((uint32_t)(throttle4 * 1000)) * 1.0e-3f + throttle_magic;
+        throttle5 = ((uint32_t)(throttle5 * 1000)) * 1.0e-3f + throttle_magic;
+
+        float throttle6 = mix_val;
+
+        // Mixture values in xplane default to 1 until they are changed. This deals with that case. It is important to set the max value in the response
+        // curve to less than 1 in this case. Also sets to 0 when fly mode engaged. 
+        if (throttle6 >= 1 || gen1 >= 1) throttle6 = 0.0;
+
+        //check if forward motor is needed
+        if (gen2 < 1) throttle5 = 0.0; 
+
+        printf("throttle6 4: %f\n", throttle6);
+        
+        d.code = ThrottleCommand;
+        d.data[0] = throttle;
+        d.data[1] = throttle2;
+        d.data[2] = throttle3;
+        d.data[3] = throttle4;
+        d.data[4] = throttle5;
+        //d.data[5] = mix_val;
+        printf("gen1 : %f\n", gen1);
+        d.data[5] = throttle6;
+        socket_out.send(&d, sizeof(d));
+    } else if (!vtol_frame) {
+        // send chan3 as collective pitch, on scale from -10 to +10
+        float collective = 10*(input.servos[2]-1500)/500.0;
+
+        // and send throttle from channel 8
+        throttle = (input.servos[4]-1000)/1000.0;
+
+        // allow for extra throttle outputs for special aircraft
+        float throttle2 = (input.servos[5]-1000)/1000.0;
+        float throttle3 = (input.servos[6]-1000)/1000.0;
+        float throttle4 = (input.servos[7]-1000)/1000.0;   
 
         d.code = PropPitch;
         d.data[0] = collective;
@@ -440,9 +500,35 @@ void XPlane::send_data(const struct sitl_input &input)
 
         d.code = ThrottleCommand;
         d.data[0] = throttle;
-        d.data[1] = throttle;
-        d.data[2] = throttle2;
-        d.data[3] = throttle3;
+        d.data[1] = throttle2;
+        d.data[2] = throttle3;
+        d.data[3] = throttle4;
+        d.data[4] = 0;
+        socket_out.send(&d, sizeof(d));
+    } else {
+        // send chan3 as collective pitch, on scale from -10 to +10
+        float collective = 10*(input.servos[2]-1500)/500.0;
+
+        // and send throttle from channel 8
+        throttle = (input.servos[4]-1000)/1000.0;
+
+        // allow for extra throttle outputs for special aircraft
+        float throttle2 = (input.servos[5]-1000)/1000.0;
+        float throttle3 = (input.servos[6]-1000)/1000.0;
+        float throttle4 = (input.servos[7]-1000)/1000.0;    
+        d.code = PropPitch;
+        d.data[0] = collective;
+        d.data[1] = 0; // reverse sense of rudder, 15 degrees pitch range
+        d.data[2] = 0;
+        d.data[3] = 0;
+        d.data[4] = 0;
+        socket_out.send(&d, sizeof(d));
+
+        d.code = ThrottleCommand;
+        d.data[0] = throttle;
+        d.data[1] = throttle2;
+        d.data[2] = throttle3;
+        d.data[3] = throttle4;
         d.data[4] = 0;
         socket_out.send(&d, sizeof(d));
     }
@@ -483,6 +569,9 @@ void XPlane::update(const struct sitl_input &input)
         float dt = (now - report.last_report_ms) * 1.0e-3f;
         printf("Data rate: %.1f FPS  Frame rate: %.1f FPS\n",
                report.data_count/dt, report.frame_count/dt);
+        if(heli_frame){printf("Heli");}
+        else if(vtol_frame){printf("VTOL");}
+        else {printf("Aircraft");}
         report.last_report_ms = now;
         report.data_count = 0;
         report.frame_count = 0;
