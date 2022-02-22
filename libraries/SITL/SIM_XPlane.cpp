@@ -464,7 +464,7 @@ void XPlane::send_data(const struct sitl_input &input)
         if (throttle6 >= 1 || gen1 >= 1) throttle6 = 0.0;
 
         //check if forward motor is needed
-        if (gen2 < 1) throttle5 = 0.0; 
+        if (gen3 < 1) throttle5 = 0.0; 
 
         printf("throttle6 4: %f\n", throttle6);
         
@@ -474,10 +474,10 @@ void XPlane::send_data(const struct sitl_input &input)
         d.data[2] = throttle3;
         d.data[3] = throttle4;
         d.data[4] = throttle5;
-        //d.data[5] = mix_val;
         printf("gen1 : %f\n", gen1);
         d.data[5] = throttle6;
         socket_out.send(&d, sizeof(d));
+        
     } else if (!vtol_frame) {
         // send chan3 as collective pitch, on scale from -10 to +10
         float collective = 10*(input.servos[2]-1500)/500.0;
